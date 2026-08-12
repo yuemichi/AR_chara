@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VRM空間認識AR (WebXR)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        #info {
+            position: absolute; top: 10px; width: 100%;
+            text-align: center; color: white; font-family: sans-serif;
+            pointer-events: none; z-index: 100;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@2.0.0/lib/three-vrm.module.js"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="info">「START AR」を押し、床をカメラで映してタップするとVRMが出現します</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { ARButton } from 'three/addons/webxr/ARButton.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { VRMLoaderPlugin } from '@pixiv/three-vrm';
+
+        let camera, scene, renderer, reticle;
+        let currentVrm = null;
+        let hitTestSource = null;
+        let hitTestSourceRequested = false;
+        const clock = new THREE.Clock();
+
+        init();
+        animate();
+
+        function init() {
+            const container = document.createElement('div');
+            document.body.appendChild(container);
+
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+            // ライティングの設定
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 2);
+            light.position.set(0.5, 1, 0.25);
+            scene.add(light);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(1, 2, 1);
+            scene.add(dirLight);
+
+            // レンダラー設定
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // WebXR ARボタンの設置
+            document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+
+            // VRMの読み込み
+            const loader = new GLTFLoader();
+            loader.register((parser) => new VRMLoaderPlugin(parser));
+            
+            loader.load('./avatar.vrm', (gltf) => {
+                const vrm = gltf.userData.vrm;
+                currentVrm = vrm;
+                vrm.scene.visible = false;
+                scene.add(vrm.scene);
+            });
+
+            // タップイベント
+            const controller = renderer.xr.getController(0);
+            controller.addEventListener('select', onSelect);
+            scene.add(controller);
+
+            // 床認識マーカー（レティクル）
+            reticle = new THREE.Mesh(
+                new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+            );
+            reticle.matrixAutoUpdate = false;
+            reticle.visible = false;
+            scene.add(reticle);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onSelect() {
+            if (reticle.visible && currentVrm) {
+                currentVrm.scene.position.setFromMatrixPosition(reticle.matrix);
+                currentVrm.scene.visible = true;
+                
+                // カメラの方に向かせる
+                const targetPos = new THREE.Vector3(camera.position.x, currentVrm.scene.position.y, camera.position.z);
+                currentVrm.scene.lookAt(targetPos);
+                currentVrm.scene.rotation.y += Math.PI;
+            }
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        function render(timestamp, frame) {
+            const deltaTime = clock.getDelta();
+            
+            // 揺れモノ（髪や服）の物理更新
+            if (currentVrm) {
+                currentVrm.update(deltaTime);
+            }
+
+            // Hit-test（平面認識）処理
+            if (frame) {
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                const session = renderer.xr.getSession();
+
+                if (hitTestSourceRequested === false) {
+                    session.requestReferenceSpace('viewer').then((refSpace) => {
+                        session.requestHitTestSource({ space: refSpace }).then((source) => {
+                            hitTestSource = source;
+                        });
+                    });
+                    session.addEventListener('end', () => {
+                        hitTestSourceRequested = false;
+                        hitTestSource = null;
+                    });
+                    hitTestSourceRequested = true;
+                }
+
+                if (hitTestSource) {
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+                    if (hitTestResults.length > 0) {
+                        const hit = hitTestResults[0];
+                        reticle.visible = true;
+                        reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+                    } else {
+                        reticle.visible = false;
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
