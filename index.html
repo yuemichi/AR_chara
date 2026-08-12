@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>画像認識AR (Safari対応)</title>
+    <title>画像認識AR (テスト版)</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #333; }
         #info {
@@ -13,7 +13,6 @@
             padding: 10px; border-radius: 8px; pointer-events: none; z-index: 100;
         }
     </style>
-    <!-- MindARと最新Three.jsの読み込み -->
     <script type="importmap">
         {
             "imports": {
@@ -40,7 +39,6 @@
 
         async function start() {
             try {
-                // サンプル画像（アライグマのカード）を認識する設定
                 const mindarThree = new MindARThree({
                     container: document.body,
                     imageTargetSrc: "https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/image-tracking/assets/card-example/targets.mind",
@@ -48,15 +46,28 @@
 
                 const { renderer, scene, camera } = mindarThree;
 
-                // 照明設定
                 const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 2);
                 scene.add(light);
                 const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
                 dirLight.position.set(1, 2, 1);
                 scene.add(dirLight);
 
-                // 画像を認識した位置を示す「アンカー」を作成
                 const anchor = mindarThree.addAnchor(0);
+
+                // ★ 画像を認識したかどうかのイベントを追加
+                anchor.onTargetFound = () => {
+                    infoElement.innerHTML = "<span style='color:lime;'>画像認識に成功！</span>（モデルは見えますか？）";
+                };
+                anchor.onTargetLost = () => {
+                    infoElement.innerHTML = "画像を探索中...（アライグマのカードを映してください）";
+                };
+
+                // ★ テスト用の赤い箱を追加（VRMが見えなくてもこれが表示されれば認識機能は正常）
+                const geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+                const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+                const cube = new THREE.Mesh(geometry, material);
+                cube.position.y = 0.25; // 画像の上に少し浮かせる
+                anchor.group.add(cube);
 
                 infoElement.innerText = "VRMファイルを読み込み中...";
 
@@ -69,31 +80,21 @@
                         const vrm = gltf.userData.vrm;
                         VRMUtils.rotateVRM0(vrm);
                         
-                        // 画像の上に収まるようにサイズを調整
                         const box = new THREE.Box3().setFromObject(vrm.scene);
                         const size = box.getSize(new THREE.Vector3());
                         const scale = 1.0 / size.y; 
                         vrm.scene.scale.set(scale, scale, scale);
-                        
-                        // 画像が「床」に置かれている想定で、キャラを起き上がらせる
                         vrm.scene.rotation.x = Math.PI / 2; 
 
                         currentVrm = vrm;
-                        // アンカー（認識した画像の位置）にキャラを追加
                         anchor.group.add(vrm.scene);
                         
-                        infoElement.innerHTML = "準備完了！<br>別の画面で「アライグマのカード」を映してください";
-                    },
-                    undefined,
-                    (error) => {
-                        infoElement.innerText = `VRMエラー: ${error.message}`;
+                        infoElement.innerHTML = "準備完了！<br>アライグマのカードを映してください";
                     }
                 );
 
-                // ARエンジンの開始（ここでカメラが起動します）
                 await mindarThree.start();
 
-                // 毎フレームの描画処理
                 renderer.setAnimationLoop(() => {
                     if (currentVrm) {
                         currentVrm.update(clock.getDelta());
