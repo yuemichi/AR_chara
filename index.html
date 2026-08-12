@@ -95,7 +95,8 @@
                 },
                 (error) => {
                     console.error(error);
-                    infoElement.innerText = "エラー: avatar.vrm が見つからないか読み込めませんでした。ファイル名と配置場所を確認してください。";
+                    // エラーの詳しい内容を画面に表示するように変更
+                    infoElement.innerText = "エラー詳細: " + (error.message || error.toString() || "不明なエラー");
                 }
             );
 
