@@ -3,46 +3,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>A-Frame VRM AR</title>
+    <title>VRM + VRMA AR</title>
     
-    <!-- 1. 超安定版のA-FrameとAR.js -->
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
     
-    <!-- 2. VRMを読み込むための拡張ライブラリ -->
     <script src="https://unpkg.com/@pixiv/three-vrm@2.0.0/lib/three-vrm.js"></script>
+    <!-- ★ 1. VRMAアニメーションを読み込むための追加ライブラリ -->
+    <script src="https://unpkg.com/@pixiv/three-vrm-animation@2.0.0/lib/three-vrm-animation.js"></script>
     
-    <!-- 3. A-Frameの中でVRMを動かすためのオリジナル連携プログラム -->
     <script>
         AFRAME.registerComponent('vrm-model', {
-            schema: { src: { type: 'string' } },
+            // ★ 2. src(モデル)に加えて、vrma(モーション)のパスも受け取るように設定
+            schema: { 
+                src: { type: 'string' },
+                vrma: { type: 'string' } 
+            },
             
             init: function () {
                 const el = this.el;
                 const loader = new THREE.GLTFLoader();
                 const textEl = document.getElementById('loading-text');
 
-                // VRMの特殊なデータ（揺れモノやアニメ調）を読み込めるようにする
                 loader.register((parser) => new THREE_VRM.VRMLoaderPlugin(parser));
 
+                // まずはキャラクター(VRM)を読み込む
                 loader.load(
                     this.data.src,
                     (gltf) => {
                         const vrm = gltf.userData.vrm;
                         THREE_VRM.VRMUtils.rotateVRM0(vrm);
                         
-                        // マーカーの上にちょうどいいサイズで乗るように調整
                         const box = new THREE.Box3().setFromObject(vrm.scene);
                         const size = box.getSize(new THREE.Vector3());
                         const scale = 1.0 / size.y;
                         vrm.scene.scale.set(scale, scale, scale);
 
-                        // A-Frameの空間にキャラクターを配置
                         el.setObject3D('mesh', vrm.scene);
                         this.vrm = vrm;
                         
-                        // 読み込み完了したらテキストを消す
-                        if(textEl) textEl.style.display = 'none';
+                        // ★ 3. キャラクター読み込み後、VRMAが指定されていれば追加で読み込む
+                        if (this.data.vrma) {
+                            textEl.innerText = 'モーションを読み込んでいます...';
+                            const vrmaLoader = new THREE.GLTFLoader();
+                            vrmaLoader.register((parser) => new THREE_VRM_ANIMATION.VRMAnimationLoaderPlugin(parser));
+                            
+                            vrmaLoader.load(this.data.vrma, (vrmaGltf) => {
+                                const vrmAnimation = vrmaGltf.userData.vrmAnimations[0];
+                                
+                                // アニメーションをキャラクターの骨格に適用する
+                                const clip = vrmAnimation.createAnimation(vrm);
+                                this.mixer = new THREE.AnimationMixer(vrm.scene);
+                                this.mixer.clipAction(clip).play();
+                                
+                                if(textEl) textEl.style.display = 'none';
+                            });
+                        } else {
+                            if(textEl) textEl.style.display = 'none';
+                        }
                     },
                     (progress) => {
                         if(progress.total > 0 && textEl) {
@@ -57,10 +75,17 @@
                 );
             },
             
-            // 毎フレームごとにキャラクターの揺れモノを計算してアニメーションさせる
             tick: function (time, timeDelta) {
+                const deltaSeconds = timeDelta / 1000;
+                
+                // ★ 4. 毎フレームごとにモーションを更新
+                if (this.mixer) {
+                    this.mixer.update(deltaSeconds);
+                }
+                
+                // 揺れモノ（髪や服）を更新
                 if (this.vrm) {
-                    this.vrm.update(timeDelta / 1000);
+                    this.vrm.update(deltaSeconds);
                 }
             }
         });
@@ -68,20 +93,18 @@
 </head>
 <body style="margin: 0px; overflow: hidden;">
     
-    <!-- 画面上部のメッセージ -->
     <div id="loading-text" style="position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; color: black; background: rgba(255,255,255,0.8); padding: 10px; font-family: sans-serif;">
         VRMファイルを読み込んでいます...
     </div>
 
-    <!-- AR空間の構築 -->
     <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" vr-mode-ui="enabled: false">
         
-        <!-- Hiroマーカー -->
-        <a-marker preset="hiro">
+        <!-- ★ カクカク軽減設定：smooth="true" とその精度パラメーターを追加 -->
+        <a-marker preset="hiro" smooth="true" smoothCount="10" smoothTolerance="0.01" smoothThreshold="5">
             
-            <!-- 🌟 先ほどの赤い箱（a-box）の代わりに、VRMモデルを呼び出す！ -->
-            <!-- rotation="0 180 0" でキャラクターがカメラ（手前）を向くようにしています -->
-            <a-entity vrm-model="src: ./avatar.vrm" rotation="0 180 0"></a-entity>
+            <!-- ★ vrma属性に再生したいVRMAファイルのパスを指定 -->
+            <!-- 例: 同じフォルダに motion.vrma をアップロードした場合 -->
+            <a-entity vrm-model="src: ./avatar.vrm; vrma: ./motion.vrma" rotation="0 180 0"></a-entity>
             
         </a-marker>
         
