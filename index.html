@@ -2,10 +2,10 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>画像認識AR (テスト版)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Hiroマーカー VRM AR</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #333; }
+        body { margin: 0; overflow: hidden; background-color: #000; }
         #info {
             position: absolute; top: 10px; width: 90%; left: 5%;
             text-align: center; color: white; font-family: sans-serif;
@@ -13,101 +13,129 @@
             padding: 10px; border-radius: 8px; pointer-events: none; z-index: 100;
         }
     </style>
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@2.0.0/lib/three-vrm.module.js",
-                "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
-            }
-        }
-    </script>
+    
+    <!-- 1. プログラム同士の喧嘩を防ぐため、安定版のライブラリを一括で読み込みます -->
+    <script src="https://unpkg.com/three@0.137.5/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.137.5/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.2/three.js/build/ar.js"></script>
+    <script src="https://unpkg.com/@pixiv/three-vrm@2.0.0/lib/three-vrm.js"></script>
 </head>
 <body>
-    <div id="info">エンジン起動中...（カメラの許可をお願いします）</div>
+    <div id="info">初期化中...（カメラを許可してください）</div>
 
-    <script type="module">
-        import * as THREE from 'three';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
-        import { MindARThree } from 'mindar-image-three';
-
+    <script>
         const infoElement = document.getElementById('info');
         let currentVrm = null;
         const clock = new THREE.Clock();
 
-        async function start() {
-            try {
-                const mindarThree = new MindARThree({
-                    container: document.body,
-                    imageTargetSrc: "https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/image-tracking/assets/card-example/targets.mind",
-                });
+        // 1. シーンとカメラの設定
+        const scene = new THREE.Scene();
+        const camera = new THREE.Camera();
+        scene.add(camera);
 
-                const { renderer, scene, camera } = mindarThree;
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.domElement.style.position = 'absolute';
+        renderer.domElement.style.top = '0px';
+        renderer.domElement.style.left = '0px';
+        document.body.appendChild(renderer.domElement);
 
-                const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 2);
-                scene.add(light);
-                const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-                dirLight.position.set(1, 2, 1);
-                scene.add(dirLight);
+        // 照明
+        const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 2);
+        scene.add(light);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(1, 2, 1);
+        scene.add(dirLight);
 
-                const anchor = mindarThree.addAnchor(0);
+        // 2. AR.jsのカメラ映像設定
+        const arToolkitSource = new THREEx.ArToolkitSource({ sourceType: 'webcam' });
+        arToolkitSource.init(function onReady() {
+            // 映像が準備できたらサイズを合わせる
+            setTimeout(() => { onResize(); }, 500);
+        });
 
-                // ★ 画像を認識したかどうかのイベントを追加
-                anchor.onTargetFound = () => {
-                    infoElement.innerHTML = "<span style='color:lime;'>画像認識に成功！</span>（モデルは見えますか？）";
-                };
-                anchor.onTargetLost = () => {
-                    infoElement.innerHTML = "画像を探索中...（アライグマのカードを映してください）";
-                };
-
-                // ★ テスト用の赤い箱を追加（VRMが見えなくてもこれが表示されれば認識機能は正常）
-                const geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-                const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-                const cube = new THREE.Mesh(geometry, material);
-                cube.position.y = 0.25; // 画像の上に少し浮かせる
-                anchor.group.add(cube);
-
-                infoElement.innerText = "VRMファイルを読み込み中...";
-
-                const loader = new GLTFLoader();
-                loader.register((parser) => new VRMLoaderPlugin(parser));
-                
-                loader.load(
-                    './avatar.vrm', 
-                    (gltf) => {
-                        const vrm = gltf.userData.vrm;
-                        VRMUtils.rotateVRM0(vrm);
-                        
-                        const box = new THREE.Box3().setFromObject(vrm.scene);
-                        const size = box.getSize(new THREE.Vector3());
-                        const scale = 1.0 / size.y; 
-                        vrm.scene.scale.set(scale, scale, scale);
-                        vrm.scene.rotation.x = Math.PI / 2; 
-
-                        currentVrm = vrm;
-                        anchor.group.add(vrm.scene);
-                        
-                        infoElement.innerHTML = "準備完了！<br>アライグマのカードを映してください";
-                    }
-                );
-
-                await mindarThree.start();
-
-                renderer.setAnimationLoop(() => {
-                    if (currentVrm) {
-                        currentVrm.update(clock.getDelta());
-                    }
-                    renderer.render(scene, camera);
-                });
-
-            } catch (e) {
-                infoElement.innerText = `起動エラー: ${e.message}`;
+        window.addEventListener('resize', function() { onResize(); });
+        function onResize() {
+            arToolkitSource.onResizeElement();
+            arToolkitSource.copyElementSizeTo(renderer.domElement);
+            if (arToolkitContext.arController !== null) {
+                arToolkitSource.copyElementSizeTo(arToolkitContext.arController.canvas);
             }
         }
 
-        start();
+        // 3. AR.jsの認識設定
+        const arToolkitContext = new THREEx.ArToolkitContext({
+            cameraParametersUrl: 'https://raw.githack.com/AR-js-org/AR.js/master/data/data/camera_para.dat',
+            detectionMode: 'mono'
+        });
+        arToolkitContext.init(function onCompleted() {
+            camera.projectionMatrix.copy(arToolkitContext.getProjectionMatrix());
+        });
+
+        // 4. Hiroマーカーの登録
+        const markerRoot = new THREE.Group();
+        scene.add(markerRoot);
+        new THREEx.ArMarkerControls(arToolkitContext, markerRoot, {
+            type: 'pattern',
+            patternUrl: 'https://raw.githack.com/AR-js-org/AR.js/master/data/data/patt.hiro'
+        });
+
+        // 5. VRMモデルの読み込み
+        infoElement.innerText = "VRMファイルを読み込み中...";
+        const loader = new THREE.GLTFLoader();
+        
+        // VRMプラグインの有効化
+        loader.register((parser) => new THREE_VRM.VRMLoaderPlugin(parser));
+
+        loader.load(
+            './avatar.vrm',
+            (gltf) => {
+                const vrm = gltf.userData.vrm;
+                THREE_VRM.VRMUtils.rotateVRM0(vrm);
+                
+                // マーカーのサイズに合わせて等身を調整
+                const box = new THREE.Box3().setFromObject(vrm.scene);
+                const size = box.getSize(new THREE.Vector3());
+                const scale = 1.2 / size.y;
+                vrm.scene.scale.set(scale, scale, scale);
+                // 正面を向かせる
+                vrm.scene.rotation.y = Math.PI;
+
+                currentVrm = vrm;
+                // マーカーのグループにキャラを追加（認識すると一緒に表示される）
+                markerRoot.add(vrm.scene);
+                
+                infoElement.innerHTML = "準備完了！<br>「Hiroマーカー」を映してください";
+            },
+            (progress) => {
+                if(progress.total > 0) {
+                    const percent = Math.floor((progress.loaded / progress.total) * 100);
+                    infoElement.innerText = `読み込み中... ${percent}%`;
+                }
+            },
+            (error) => {
+                infoElement.innerText = `エラー: ${error.message}`;
+                console.error(error);
+            }
+        );
+
+        // 6. 描画ループ
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // カメラ映像の解析
+            if (arToolkitSource.ready !== false) {
+                arToolkitContext.update(arToolkitSource.domElement);
+            }
+
+            // キャラクターの揺れモノ処理
+            if (currentVrm) {
+                currentVrm.update(clock.getDelta());
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
     </script>
 </body>
 </html>
