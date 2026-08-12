@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VRM空間認識AR (デバッグ機能付き)</title>
+    <title>VRM空間認識AR (最終調整版)</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #333; }
         #info {
@@ -49,11 +49,11 @@
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
-            // ライティング
-            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 2);
+            // ライティングを少し明るめに調整
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
             dirLight.position.set(1, 2, 1);
             scene.add(dirLight);
 
@@ -66,44 +66,47 @@
 
             document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
 
-            // VRM読み込み処理
             infoElement.innerText = "VRMファイルを読み込み中...";
             const loader = new GLTFLoader();
             loader.register((parser) => new VRMLoaderPlugin(parser));
             
-            // ★ VRMファイル名の指定（大文字・小文字も正確に一致させてください）
             loader.load(
                 './avatar.vrm', 
                 (gltf) => {
                     const vrm = gltf.userData.vrm;
-                    
-                    // VRM 0.x 形式のモデル補正処理
                     VRMUtils.rotateVRM0(vrm);
                     
+                    // ★強制的に大きさを統一（大きすぎる/小さすぎる問題の回避）
+                    // 一旦スケールを1にし、モデルの中心を足元に合わせます
+                    const box = new THREE.Box3().setFromObject(vrm.scene);
+                    const size = box.getSize(new THREE.Vector3());
+                    // モデルの高さが1mになるようにスケールを調整
+                    const scale = 1.0 / size.y;
+                    vrm.scene.scale.set(scale, scale, scale);
+
                     currentVrm = vrm;
                     vrm.scene.visible = false;
                     scene.add(vrm.scene);
-                    infoElement.innerText = "読み込み完了！「START AR」を押し、緑の円が出たら画面をタップしてください";
+                    infoElement.innerText = "読み込み完了！緑の円が出たら画面をタップしてください";
                 },
-                (progress) => {
-                    if (progress.total > 0) {
-                        const percent = Math.floor((progress.loaded / progress.total) * 100);
-                        infoElement.innerText = `VRM読み込み中: ${percent}%`;
-                    } else {
-                        infoElement.innerText = "VRMデータを受信中...";
-                    }
-                },
+                undefined,
                 (error) => {
                     console.error(error);
-                    // エラーの詳しい内容を画面に表示するように変更
-                    infoElement.innerText = "エラー詳細: " + (error.message || error.toString() || "不明なエラー");
+                    infoElement.innerText = "エラー詳細: " + (error.message || "不明なエラー");
                 }
             );
 
-            // タップ処理
+            // タップ処理 (標準のWebXR用)
             const controller = renderer.xr.getController(0);
             controller.addEventListener('select', onSelect);
             scene.add(controller);
+
+            // ★タップ処理の予備 (WebXR Viewerでタップが認識されないバグの回避用)
+            window.addEventListener('touchstart', (e) => {
+                // ボタンなどを押した時は反応させない
+                if (e.target.tagName !== 'CANVAS') return;
+                onSelect();
+            });
 
             // 床認識マーカー
             reticle = new THREE.Mesh(
@@ -125,19 +128,24 @@
 
         function onSelect() {
             if (!currentVrm) {
-                infoElement.innerText = "モデルの読み込みが完了していません。少し待ってからタップしてください。";
+                infoElement.innerText = "モデルの読み込みが完了していません。";
                 return;
             }
 
             if (reticle.visible && currentVrm) {
+                // マーカーの位置に移動
                 currentVrm.scene.position.setFromMatrixPosition(reticle.matrix);
                 currentVrm.scene.visible = true;
                 
                 // カメラの方向へ向かせる
                 const targetPos = new THREE.Vector3(camera.position.x, currentVrm.scene.position.y, camera.position.z);
                 currentVrm.scene.lookAt(targetPos);
+                // 正面を向かせるための補正
+                currentVrm.scene.rotation.y += Math.PI; 
                 
                 infoElement.innerText = "キャラクターを配置しました！";
+            } else if (!reticle.visible) {
+                infoElement.innerText = "緑の円（マーカー）が床に出ている時にタップしてください";
             }
         }
 
